@@ -1,322 +1,138 @@
-import { useCallback, useState, useMemo } from 'react'
-import { Search, Star, Trash2, Copy, Clock, Code, Link as LinkIcon, Filter } from 'lucide-react'
-import { useClipboardStore, useFilteredEntries } from '../../../stores/useClipboardStore'
-import { ClipboardEntry } from '../../../types/clipboard'
-import { formatDistanceToNow, isToday, isYesterday, format, startOfWeek, isThisWeek } from 'date-fns'
-import {  
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
-  DialogFooter, 
-  DialogClose 
-} from '../../ui/dialog/Dialog'
-import { Tooltip } from '../../ui/tooltip/Tooltip'
-import { ErrorBoundary } from '../../ErrorBoundary'
+import { useState } from 'react'
+import { format } from 'date-fns'
+import { ClipboardContent } from '../../../types/clipboard'
+import { useClipboard } from '../../../stores/clipboardStore'
 
-type EntryType = 'text' | 'code' | 'link'
-
-interface FilterOptions {
-  type?: EntryType
-  favoritesOnly: boolean
-}
-
-function detectEntryType(content: string): EntryType {
-  // Simple URL detection
-  if (/^https?:\/\/[^\s]+$/.test(content.trim())) {
-    return 'link'
-  }
-  // Simple code detection (starts with common programming patterns)
-  if (/^(import|function|class|const|let|var|if|for|while|def|package|#include)/.test(content.trim())) {
-    return 'code'
-  }
-  return 'text'
-}
-
-function groupEntriesByDate(entries: ClipboardEntry[]) {
+function groupEntriesByDate(entries: ClipboardContent[]) {
   return entries.reduce((groups, entry) => {
-    const date = new Date(entry.timestamp)
-    let key = 'Older'
-
-    if (isToday(date)) {
-      key = 'Today'
-    } else if (isYesterday(date)) {
-      key = 'Yesterday'
-    } else if (isThisWeek(date)) {
-      key = 'This Week'
-    } else {
-      key = format(date, 'MMMM yyyy')
+    const date = new Date(entry.timestamp * 1000)
+    const dateKey = format(date, 'yyyy-MM-dd')
+    
+    if (!groups[dateKey]) {
+      groups[dateKey] = []
     }
-
-    if (!groups[key]) {
-      groups[key] = []
+    
+    // Skip empty or very short content
+    if (entry.format.format === 'Text' && !entry.format.content.trim()) {
+      return groups;
     }
-    groups[key].push(entry)
+    
+    groups[dateKey].push(entry)
     return groups
-  }, {} as Record<string, ClipboardEntry[]>)
+  }, {} as Record<string, ClipboardContent[]>)
+}
+
+function formatContent(content: string): string {
+  // Trim and limit length for display
+  const trimmed = content.trim();
+  if (trimmed.length > 100) {
+    return trimmed.slice(0, 100) + '...';
+  }
+  return trimmed;
 }
 
 export function HistoryView() {
-    console.log('HistoryView rendering')
-    const [selectedEntry, setSelectedEntry] = useState<ClipboardEntry | null>(null)
-    const [copyFeedback, setCopyFeedback] = useState(false)
-    const [filterOptions, setFilterOptions] = useState<FilterOptions>({
-      favoritesOnly: false,
-    })
-    const [isFilterOpen, setIsFilterOpen] = useState(false);
-    
-    const entries = useFilteredEntries()
-    const { filter, setFilter, removeEntry, toggleFavorite } = useClipboardStore()
-    
-    console.log('Current entries:', entries)
-    console.log('Current filter:', filter)
+  const { filteredHistory, copyContent, toggleFavorite, deleteItem } = useClipboard()
+  const [selectedEntry, setSelectedEntry] = useState<ClipboardContent | null>(null)
 
-    const filteredEntries = useMemo(() => {
-      return entries.filter(entry => {
-        if (filterOptions.favoritesOnly && !entry.favorite) return false
-        if (filterOptions.type && detectEntryType(entry.content) !== filterOptions.type) return false
-        return true
-      })
-    }, [entries, filterOptions])
+  console.log('HistoryView rendered with history:', filteredHistory);
 
-    const groupedEntries = useMemo(() => {
-      return groupEntriesByDate(filteredEntries)
-    }, [filteredEntries])
+  const groupedEntries = groupEntriesByDate(filteredHistory)
+  const dates = Object.keys(groupedEntries).sort().reverse()
 
-    const copy = useCallback(async (content: string) => {
-      try {
-        await navigator.clipboard.writeText(content)
-        setCopyFeedback(true)
-        setTimeout(() => setCopyFeedback(false), 2000)
-      } catch (error) {
-        console.error('Failed to copy:', error)
-      }
-    }, [])
+  console.log('Grouped entries:', groupedEntries);
+  console.log('Dates:', dates);
 
-    const getEntryIcon = (content: string) => {
-      const type = detectEntryType(content)
-      switch (type) {
-        case 'code':
-          return <Code size={16} className="text-purple-500" />
-        case 'link':
-          return <LinkIcon size={16} className="text-blue-500" />
-        default:
-          return null
-      }
-    }
-
-    return (
-      <ErrorBoundary>
-        <div className="h-full flex flex-col bg-gray-50 relative">
-          <div className="p-4 bg-white border-b">
-            <div className="flex gap-4 items-center">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                <input
-                  type="text"
-                  placeholder="Search clips... (Press '/' to focus)"
-                  value={filter.search}
-                  onChange={(e) => setFilter({ search: e.target.value })}
-                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <Tooltip content="Show favorites only" position="bottom">
-                  <button
-                    onClick={() => setFilterOptions(prev => ({ ...prev, favoritesOnly: !prev.favoritesOnly }))}
-                    className={`p-2 rounded-lg transition-colors ${filterOptions.favoritesOnly ? 'bg-yellow-100 text-yellow-600' : 'hover:bg-gray-100'}`}
-                  >
-                    <Star size={20} />
-                  </button>
-                </Tooltip>
-                <div className="relative">
-                  <Tooltip content="Filter by type" position="bottom">
-                    <button
-                      onClick={() => setIsFilterOpen(!isFilterOpen)}
-                      className={`p-2 rounded-lg transition-colors ${isFilterOpen ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-100'}`}
+  return (
+    <div className="p-6 min-h-screen bg-gray-100 dark:bg-gray-900">
+      {dates.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-96 text-gray-500 dark:text-gray-400">
+          <p className="text-lg font-medium">No clipboard history yet</p>
+          <p className="text-sm">Copy something to see it here</p>
+        </div>
+      ) : (
+        <div className="space-y-6 max-w-4xl mx-auto">
+          {dates.map(date => {
+            console.log(`Rendering entries for date: ${date}`, groupedEntries[date]);
+            return (
+              <div key={date}>
+                <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
+                  {format(new Date(date), 'MMMM d, yyyy')}
+                </h2>
+                <div className="space-y-2">
+                  {groupedEntries[date].map(entry => (
+                    <div
+                      key={entry.timestamp}
+                      className={`p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm cursor-pointer transition-colors
+                        ${selectedEntry?.timestamp === entry.timestamp ? 'ring-2 ring-blue-500' : ''}
+                        hover:bg-gray-50 dark:hover:bg-gray-700`}
+                      onClick={() => setSelectedEntry(entry)}
                     >
-                      <Filter size={20} />
-                    </button>
-                  </Tooltip>
-                  {isFilterOpen && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-10"
-                        onClick={() => setIsFilterOpen(false)}
-                      />
-                      <div className="absolute right-0 mt-2 bg-white rounded-lg shadow-lg border p-2 space-y-1 z-20">
-                        {(['text', 'code', 'link'] as const).map(type => (
-                          <button
-                            key={type}
-                            onClick={() => {
-                              setFilterOptions(prev => ({ ...prev, type }));
-                              setIsFilterOpen(false);
-                            }}
-                            className={`w-full px-3 py-1 rounded-md text-left capitalize ${filterOptions.type === type ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-50'}`}
-                          >
-                            {type}
-                          </button>
-                        ))}
-                        {filterOptions.type && (
-                          <button
-                            onClick={() => {
-                              setFilterOptions(prev => ({ ...prev, type: undefined }));
-                              setIsFilterOpen(false);
-                            }}
-                            className="w-full px-3 py-1 rounded-md text-left text-gray-500 hover:bg-gray-50"
-                          >
-                            Clear filter
-                          </button>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-    
-          <div className="flex-1 overflow-auto">
-            {Object.entries(groupedEntries).length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-gray-500">
-                <Clock size={48} className="mb-2" />
-                <p>{filter.search ? 'No matching clips found' : 'Waiting for clipboard content...'}</p>
-                <p className="text-sm text-gray-400 mt-2">Copy something to see it here</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-100">
-                {Object.entries(groupedEntries).map(([date, dateEntries]) => (
-                  <div key={date} className="bg-white">
-                    <div className="sticky top-0 bg-gray-50 px-4 py-2 border-b">
-                      <h2 className="text-sm font-medium text-gray-500">{date}</h2>
-                    </div>
-                    <div className="divide-y divide-gray-100">
-                      {dateEntries.map((entry) => (
-                        <div
-                          key={entry.id}
-                          onClick={() => setSelectedEntry(entry)}
-                          className="group px-4 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-3"
-                        >
-                          <div className="flex-shrink-0">
-                            {getEntryIcon(entry.content)}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm text-gray-900 truncate">{entry.content}</p>
-                            <p className="text-xs text-gray-500 flex items-center gap-2">
-                              <span className="flex items-center gap-1">
-                                <Clock size={12} />
-                                {formatDistanceToNow(entry.timestamp, { addSuffix: true })}
-                              </span>
-                              {entry.favorite && (
-                                <span className="flex items-center gap-1">
-                                  <Star size={12} className="text-yellow-500" />
-                                  <span className="text-yellow-600">Favorite</span>
-                                </span>
-                              )}
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            {entry.favorite && (
+                              <span className="text-yellow-500">★</span>
+                            )}
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                              {entry.format.format === 'Text' ? formatContent(entry.format.content) : 
+                               entry.format.format === 'Image' ? 'Image' :
+                               entry.format.format === 'Files' ? `${entry.format.files.length} file(s)` :
+                               entry.format.format}
                             </p>
                           </div>
-                          <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-2">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                copy(entry.content);
-                              }}
-                              className="p-1 hover:bg-gray-200 rounded-md"
-                            >
-                              <Copy size={14} />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleFavorite(entry.id);
-                              }}
-                              className="p-1 hover:bg-gray-200 rounded-md"
-                            >
-                              <Star size={14} className={entry.favorite ? 'text-yellow-500' : ''} />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                removeEntry(entry.id);
-                              }}
-                              className="p-1 hover:bg-gray-200 rounded-md text-red-500 hover:text-red-600"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {format(new Date(entry.timestamp * 1000), 'h:mm a')}
+                          </p>
                         </div>
-                      ))}
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              toggleFavorite(entry.timestamp)
+                            }}
+                            className={`p-1 rounded-full ${
+                              entry.favorite
+                                ? 'text-yellow-500 hover:text-yellow-600'
+                                : 'text-gray-400 hover:text-yellow-500'
+                            }`}
+                          >
+                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              copyContent(entry)
+                            }}
+                            className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              deleteItem(entry.timestamp)
+                            }}
+                            className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            )}
-          </div>
-    
-          <Dialog open={selectedEntry !== null} onClose={() => setSelectedEntry(null)}>
-            {selectedEntry && (
-              <>
-                <DialogHeader>
-                  <DialogTitle>
-                    <div className="flex items-center gap-2">
-                      {getEntryIcon(selectedEntry.content)}
-                      <span>Clipboard Entry</span>
-                    </div>
-                  </DialogTitle>
-                  <DialogClose onClose={() => setSelectedEntry(null)} />
-                </DialogHeader>
-                <DialogContent>
-                  <div 
-                    className="bg-gray-50 rounded-lg"
-                    style={{
-                      maxHeight: 'min(60vh, 400px)',
-                      overflowY: 'auto'
-                    }}
-                  >
-                    <pre 
-                      className="p-4 text-sm whitespace-pre-wrap break-words font-mono"
-                      style={{
-                        wordBreak: 'break-word',
-                        overflowWrap: 'break-word'
-                      }}
-                    >
-                      {selectedEntry.content}
-                    </pre>
-                  </div>
-                </DialogContent>
-                <DialogFooter>
-                  <Tooltip content={copyFeedback ? 'Copied!' : 'Copy to clipboard'} position="top">
-                    <button 
-                      onClick={() => copy(selectedEntry.content)}
-                      className="p-2 rounded-full hover:bg-gray-100 transition-colors"
-                    >
-                      <Copy className={copyFeedback ? 'text-green-500' : ''} />
-                    </button>
-                  </Tooltip>
-                  <Tooltip content={selectedEntry.favorite ? 'Remove from favorites' : 'Add to favorites'}>
-                    <button 
-                      onClick={() => toggleFavorite(selectedEntry.id)}
-                      className="p-2 rounded-full hover:bg-gray-100 transition-colors"
-                    >
-                      <Star className={selectedEntry.favorite ? 'text-yellow-500' : ''} />
-                    </button>
-                  </Tooltip>
-                  <Tooltip content="Delete">
-                    <button 
-                      onClick={() => {
-                        removeEntry(selectedEntry.id)
-                        setSelectedEntry(null)
-                      }}
-                      className="p-2 rounded-full hover:bg-gray-100 transition-colors"
-                    >
-                      <Trash2 className="text-red-500" />
-                    </button>
-                  </Tooltip>
-                </DialogFooter>
-              </>
-            )}
-          </Dialog>
+            );
+          })}
         </div>
-      </ErrorBoundary>
-    )
+      )}
+    </div>
+  )
 }
