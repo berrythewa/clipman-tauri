@@ -3,6 +3,8 @@ import { RouterProvider } from '@tanstack/react-router'
 import { router } from './routes'
 import { initializeClipboardMonitoring } from './stores/useClipboardStore'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { AuthProvider } from './components/auth/AuthProvider'
+import './App.css'
 
 function App() {
   useEffect(() => {
@@ -10,9 +12,11 @@ function App() {
   }, [])
 
   return (
-    <ErrorBoundary>
-      <RouterProvider router={router} />
-    </ErrorBoundary>
+    <AuthProvider>
+      <ErrorBoundary>
+        <RouterProvider router={router} />
+      </ErrorBoundary>
+    </AuthProvider>
   )
 }
 
